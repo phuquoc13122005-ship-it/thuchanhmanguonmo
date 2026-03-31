@@ -1,0 +1,4 @@
+vendor/
+.env
+extract.txt
+extract2.txt

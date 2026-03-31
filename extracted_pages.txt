@@ -1,0 +1,1240 @@
+--- Page 84 ---
+BÀI 5 XÂY DỰNG RESTful API 79 
+ 
+BÀI 5.  XÂY DỰNG RESTful API  
+Sau khi học xong bài này, sinh viên có thể nắm được: 
+• Khái niệm về RESTful API: Hiểu các nguyên tắc cơ bản của REST và cách thức 
+hoạt động của RESTful API. 
+• Cấu hình API trong PHP: Biết cách cấu hình và triển khai API sử dụng PHP. 
+• Xây dựng các phương thức CRUD cho API : Tạo các phương thức GET, POST, 
+PUT, DELETE để quản lý tài nguyên. 
+• Tạo và quản lý endpoints: Thiết kế và triển khai các endpoints API cho các chức 
+năng khác nhau. 
+• Kiểm thử API: Sử dụng Postman hoặc công cụ tương tự để kiểm thử các API đã 
+triển khai. 
+5.1 Cập nhật ProductModel  
+Bỏ thuộc tính image của product 
+<?php 
+class ProductModel 
+{ 
+    private $conn; 
+    private $table_name = "product"; 
+ 
+    public function __construct($db) 
+    { 
+        $this->conn = $db; 
+    } 
+ 
+    public function getProducts() 
+    { 
+        $query = "SELECT p.id, p.name, p.description, p.price, c.name as category_name 
+                  FROM " . $this->table_name . " p 
+                  LEFT JOIN category c ON p.category_id = c.id"; 
+        $stmt = $this->conn->prepare($query); 
+        $stmt->execute(); 
+        $result = $stmt->fetchAll(PDO::FETCH_OBJ); 
+        return $result; 
+    } 
+ 
+    public function getProductById($id) 
+--- Page 85 ---
+80 BÀI 5XÂY DỰNG RESTful API 
+ 
+    { 
+        $query = "SELECT * FROM " . $this->table_name . " WHERE id = :id"; 
+        $stmt = $this->conn->prepare($query); 
+        $stmt->bindParam(':id', $id); 
+        $stmt->execute(); 
+        $result = $stmt->fetch(PDO::FETCH_OBJ); 
+        return $result; 
+    } 
+ 
+    public function addProduct($name, $description, $price, $category_id) 
+    { 
+        $errors = []; 
+        if (empty($name)) { 
+            $errors['name'] = 'Tên sản phẩm không được để trống'; 
+        } 
+        if (empty($description)) { 
+            $errors['description'] = 'Mô tả không được để trống'; 
+        } 
+        if (!is_numeric($price) || $price < 0) { 
+            $errors['price'] = 'Giá sản phẩm không hợp lệ'; 
+        } 
+        if (count($errors) > 0) { 
+            return $errors; 
+        } 
+ 
+        $query = "INSERT INTO " . $this->table_name . " (name, description, price, 
+category_id) VALUES (:name, :description, :price, :category_id)"; 
+        $stmt = $this->conn->prepare($query); 
+ 
+        $name = htmlspecialchars(strip_tags($name)); 
+        $description = htmlspecialchars(strip_tags($description)); 
+        $price = htmlspecialchars(strip_tags($price)); 
+        $category_id = htmlspecialchars(strip_tags($category_id)); 
+       
+ 
+        $stmt->bindParam(':name', $name); 
+        $stmt->bindParam(':description', $description); 
+        $stmt->bindParam(':price', $price); 
+        $stmt->bindParam(':category_id', $category_id); 
+ 
+        if ($stmt->execute()) { 
+            return true; 
+        } 
+ 
+        return false; 
+    } 
+ 
+--- Page 86 ---
+BÀI 5 XÂY DỰNG RESTful API 81 
+ 
+    public function updateProduct($id, $name, $description, $price, $category_id) 
+    { 
+        $query = "UPDATE " . $this->table_name . " SET name=:name, 
+description=:description, price=:price, category_id=:category_id WHERE id=:id"; 
+        $stmt = $this->conn->prepare($query); 
+ 
+        $name = htmlspecialchars(strip_tags($name)); 
+        $description = htmlspecialchars(strip_tags($description)); 
+        $price = htmlspecialchars(strip_tags($price)); 
+        $category_id = htmlspecialchars(strip_tags($category_id)); 
+         
+ 
+        $stmt->bindParam(':id', $id); 
+        $stmt->bindParam(':name', $name); 
+        $stmt->bindParam(':description', $description); 
+        $stmt->bindParam(':price', $price); 
+        $stmt->bindParam(':category_id', $category_id); 
+ 
+        if ($stmt->execute()) { 
+            return true; 
+        } 
+        return false; 
+    } 
+ 
+    public function deleteProduct($id) 
+    { 
+        $query = "DELETE FROM " . $this->table_name . " WHERE id=:id"; 
+        $stmt = $this->conn->prepare($query); 
+        $stmt->bindParam(':id', $id); 
+        if ($stmt->execute()) { 
+            return true; 
+        } 
+        return false; 
+    } 
+} 
+?> 
+5.2 Xây dựng các Controller tương ứng 
+ 
+Xây dựng file ProductApiController.php 
+ 
+<?php 
+require_once('app/config/database.php'); 
+require_once('app/models/ProductModel.php'); 
+require_once('app/models/CategoryModel.php'); 
+ 
+--- Page 87 ---
+82 BÀI 5XÂY DỰNG RESTful API 
+ 
+class ProductApiController 
+{ 
+    private $productModel; 
+    private $db; 
+ 
+    public function __construct() 
+    { 
+        $this->db = (new Database())->getConnection(); 
+        $this->productModel = new ProductModel($this->db); 
+    } 
+ 
+    // Lấy danh sách sản phẩm 
+    public function index() 
+    { 
+        header('Content-Type: application/json'); 
+        $products = $this->productModel->getProducts(); 
+        echo json_encode($products); 
+    } 
+ 
+    // Lấy thông tin sản phẩm theo ID 
+    public function show($id) 
+    { 
+        header('Content-Type: application/json'); 
+        $product = $this->productModel->getProductById($id); 
+        if ($product) { 
+            echo json_encode($product); 
+        } else { 
+            http_response_code(404); 
+            echo json_encode(['message' => 'Product not found']); 
+        } 
+    } 
+ 
+    // Thêm sản phẩm mới 
+    public function store() 
+    { 
+         
+        header('Content-Type: application/json'); 
+        $data = json_decode(file_get_contents("php://input"), true); 
+ 
+        $name = $data['name'] ?? ''; 
+        $description = $data['description'] ?? ''; 
+        $price = $data['price'] ?? ''; 
+        $category_id = $data['category_id'] ?? null; 
+ 
+        $result = $this->productModel->addProduct($name, $description, $price, 
+$category_id, null); 
+ 
+--- Page 88 ---
+BÀI 5 XÂY DỰNG RESTful API 83 
+ 
+        if (is_array($result)) { 
+            http_response_code(400); 
+            echo json_encode(['errors' => $result]); 
+        } else { 
+            http_response_code(201); 
+            echo json_encode(['message' => 'Product created successfully']); 
+        } 
+    } 
+ 
+    // Cập nhật sản phẩm theo ID 
+    public function update($id) 
+    { 
+        header('Content-Type: application/json'); 
+        $data = json_decode(file_get_contents("php://input"), true); 
+ 
+        $name = $data['name'] ?? ''; 
+        $description = $data['description'] ?? ''; 
+        $price = $data['price'] ?? ''; 
+        $category_id = $data['category_id'] ?? null; 
+ 
+        $result = $this->productModel->updateProduct($id, $name, $description, $price, 
+$category_id, null); 
+ 
+        if ($result) { 
+            echo json_encode(['message' => 'Product updated successfully']); 
+        } else { 
+            http_response_code(400); 
+            echo json_encode(['message' => 'Product update failed']); 
+        } 
+    } 
+ 
+    // Xóa sản phẩm theo ID 
+    public function destroy($id) 
+    { 
+        header('Content-Type: application/json'); 
+        $result = $this->productModel->deleteProduct($id); 
+ 
+        if ($result) { 
+            echo json_encode(['message' => 'Product deleted successfully']); 
+        } else { 
+            http_response_code(400); 
+            echo json_encode(['message' => 'Product deletion failed']); 
+        } 
+    } 
+} 
+?> 
+ 
+--- Page 89 ---
+84 BÀI 5XÂY DỰNG RESTful API 
+ 
+ 
+Xây dựng file CategoryApiController.php 
+<?php 
+require_once('app/config/database.php'); 
+require_once('app/models/CategoryModel.php'); 
+ 
+class CategoryApiController 
+{ 
+    private $categoryModel; 
+    private $db; 
+ 
+    public function __construct() 
+    { 
+        $this->db = (new Database())->getConnection(); 
+        $this->categoryModel = new CategoryModel($this->db); 
+    } 
+ 
+    // Lấy danh sách danh mục 
+    public function index() 
+    { 
+        header('Content-Type: application/json'); 
+        $categories = $this->categoryModel->getCategories(); 
+        echo json_encode($categories); 
+    } 
+} 
+?> 
+ 
+5.3 Cấu hình router để định tuyến các yêu cầu 
+API  
+<?php 
+session_start(); 
+require_once 'app/models/ProductModel.php'; 
+require_once 'app/helpers/SessionHelper.php'; 
+ 
+require_once 'app/controllers/ProductApiController.php'; 
+require_once 'app/controllers/CategoryApiController.php'; 
+// Start session 
+ 
+ 
+$url = $_GET['url'] ?? ''; 
+$url = rtrim($url, '/'); 
+$url = filter_var($url, FILTER_SANITIZE_URL); 
+$url = explode('/', $url); 
+ 
+--- Page 90 ---
+BÀI 5 XÂY DỰNG RESTful API 85 
+ 
+// Kiểm tra phần đầu tiên của URL để xác định controller 
+$controllerName = isset($url[0]) && $url[0] != '' ? ucfirst($url[0]) . 'Controller' : 
+'DefaultController'; 
+ 
+// Kiểm tra phần thứ hai của URL để xác định action 
+$action = isset($url[1]) && $url[1] != '' ? $url[1] : 'index'; 
+ 
+// Định tuyến các yêu cầu API 
+if ($controllerName === 'ApiController' && isset($url[1])) { 
+    $apiControllerName = ucfirst($url[1]) . 'ApiController'; 
+    if (file_exists('app/controllers/' . $apiControllerName . '.php')) { 
+        require_once 'app/controllers/' . $apiControllerName . '.php'; 
+        $controller = new $apiControllerName(); 
+         
+        $method = $_SERVER['REQUEST_METHOD']; 
+        $id = $url[2] ?? null; 
+         
+        switch ($method) { 
+            case 'GET': 
+                if ($id) { 
+                    $action = 'show'; 
+                } else { 
+                    $action = 'index'; 
+                } 
+                break; 
+            case 'POST': 
+                $action = 'store'; 
+                break; 
+            case 'PUT': 
+                if ($id) { 
+                    $action = 'update'; 
+                } 
+                break; 
+            case 'DELETE': 
+                if ($id) { 
+                    $action = 'destroy'; 
+                } 
+                break; 
+            default: 
+                http_response_code(405); 
+                echo json_encode(['message' => 'Method Not Allowed']); 
+                exit; 
+        } 
+         
+        if (method_exists($controller, $action)) { 
+            if ($id) { 
+                call_user_func_array([$controller, $action], [$id]); 
+--- Page 91 ---
+86 BÀI 5XÂY DỰNG RESTful API 
+ 
+            } else { 
+                call_user_func_array([$controller, $action], []); 
+            } 
+        } else { 
+            http_response_code(404); 
+            echo json_encode(['message' => 'Action not found']); 
+        } 
+        exit; 
+    } else { 
+        http_response_code(404); 
+        echo json_encode(['message' => 'Controller not found']); 
+        exit; 
+    } 
+} 
+ 
+// Tạo đối tượng controller tương ứng cho các yêu cầu không phải API 
+if (file_exists('app/controllers/' . $controllerName . '.php')) { 
+    require_once 'app/controllers/' . $controllerName . '.php'; 
+    $controller = new $controllerName(); 
+} else { 
+    die('Controller not found'); 
+} 
+ 
+// Kiểm tra và gọi action 
+if (method_exists($controller, $action)) { 
+    call_user_func_array([$controller, $action], array_slice($url, 2)); 
+} else { 
+    die('Action not found'); 
+} 
+?> 
+5.4 Cập nhật views để quản lý sản phẩm 
+app/views/product/list.php 
+<?php include 'app/views/shares/header.php'; ?> 
+ 
+<h1>Danh sách sản phẩm</h1> 
+<a href="/webbanhang/Product/add" class="btn btn-success mb-2">Thêm sản phẩm mới</a> 
+<ul class="list-group" id="product-list"> 
+    <!-- Danh sách sản phẩm sẽ được tải từ API và hiển thị tại đây --> 
+</ul> 
+ 
+<?php include 'app/views/shares/footer.php'; ?> 
+ 
+<script> 
+document.addEventListener("DOMContentLoaded", function() { 
+    fetch('/webbanhang/api/product') 
+--- Page 92 ---
+BÀI 5 XÂY DỰNG RESTful API 87 
+ 
+        .then(response => response.json()) 
+        .then(data => { 
+            const productList = document.getElementById('product-list'); 
+            data.forEach(product => { 
+                const productItem = document.createElement('li'); 
+                productItem.className = 'list-group-item'; 
+                productItem.innerHTML = ` 
+                    <h2><a 
+href="/webbanhang/Product/show/${product.id}">${product.name}</a></h2> 
+                    <p>${product.description}</p> 
+                    <p>Giá: ${product.price} VND</p> 
+                    <p>Danh mục: ${product.category_name}</p> 
+                    <a href="/webbanhang/Product/edit/${product.id}" class="btn btn-
+warning">Sửa</a> 
+                    <button class="btn btn-danger" 
+onclick="deleteProduct(${product.id})">Xóa</button> 
+                `; 
+                productList.appendChild(productItem); 
+            }); 
+        }); 
+}); 
+ 
+function deleteProduct(id) { 
+    if (confirm('Bạn có chắc chắn muốn xóa sản phẩm này?')) { 
+        fetch(`/webbanhang/api/product/${id}`, { 
+            method: 'DELETE' 
+        }) 
+        .then(response => response.json()) 
+        .then(data => { 
+            if (data.message === 'Product deleted successfully') { 
+                location.reload(); 
+            } else { 
+                alert('Xóa sản phẩm thất bại'); 
+            } 
+        }); 
+    } 
+} 
+</script> 
+ 
+app/views/product/add.php 
+ 
+<?php include 'app/views/shares/header.php'; ?> 
+ 
+<h1>Thêm sản phẩm mới</h1> 
+<form id="add-product-form"> 
+    <div class="form-group"> 
+        <label for="name">Tên sản phẩm:</label> 
+--- Page 93 ---
+88 BÀI 5XÂY DỰNG RESTful API 
+ 
+        <input type="text" id="name" name="name" class="form-control" required> 
+    </div> 
+    <div class="form-group"> 
+        <label for="description">Mô tả:</label> 
+        <textarea id="description" name="description" class="form-control" 
+required></textarea> 
+    </div> 
+    <div class="form-group"> 
+        <label for="price">Giá:</label> 
+        <input type="number" id="price" name="price" class="form-control" step="0.01" 
+required> 
+    </div> 
+    <div class="form-group"> 
+        <label for="category_id">Danh mục:</label> 
+        <select id="category_id" name="category_id" class="form-control" required> 
+            <!-- Các danh mục sẽ được tải từ API và hiển thị tại đây --> 
+        </select> 
+    </div> 
+    <button type="submit" class="btn btn-primary">Thêm sản phẩm</button> 
+</form> 
+ 
+<a href="/webbanhang/Product/list" class="btn btn-secondary mt-2">Quay lại danh sách 
+sản phẩm</a> 
+ 
+<?php include 'app/views/shares/footer.php'; ?> 
+ 
+<script> 
+document.addEventListener("DOMContentLoaded", function() { 
+    fetch('/webbanhang/api/category') 
+        .then(response => response.json()) 
+        .then(data => { 
+            const categorySelect = document.getElementById('category_id'); 
+            data.forEach(category => { 
+                const option = document.createElement('option'); 
+                option.value = category.id; 
+                option.textContent = category.name; 
+                categorySelect.appendChild(option); 
+            }); 
+        }); 
+ 
+    document.getElementById('add-product-form').addEventListener('submit', 
+function(event) { 
+        event.preventDefault(); 
+ 
+        const formData = new FormData(this); 
+        const jsonData = {}; 
+        formData.forEach((value, key) => { 
+--- Page 94 ---
+BÀI 5 XÂY DỰNG RESTful API 89 
+ 
+            jsonData[key] = value; 
+        }); 
+ 
+      
+ 
+        fetch('/webbanhang/api/product', { 
+            method: 'POST', 
+            headers: { 
+                'Content-Type': 'application/json' 
+            }, 
+            body: JSON.stringify(jsonData) 
+        }) 
+        .then(response => response.json()) 
+        .then(text => { 
+        console.log('Raw response:', text); // Log the raw response text 
+        try { 
+            const data = text; 
+            if (data.message === 'Product created successfully') { 
+                location.href = '/webbanhang/Product'; 
+            } else { 
+                alert('Thêm sản phẩm thất bại'); 
+            } 
+        } catch (error) { 
+            console.error('Error parsing JSON:', error); 
+            alert('Lỗi: Không thể phân tích JSON từ phản hồi của máy chủ.'); 
+        } 
+    }); 
+    }); 
+}); 
+</script> 
+ 
+app/views/product/edit.php 
+<?php include 'app/views/shares/header.php'; ?> 
+ 
+<h1>Sửa sản phẩm</h1> 
+<form id="edit-product-form"> 
+    <input type="hidden" id="id" name="id"> 
+    <div class="form-group"> 
+        <label for="name">Tên sản phẩm:</label> 
+        <input type="text" id="name" name="name" class="form-control" required> 
+    </div> 
+    <div class="form-group"> 
+        <label for="description">Mô tả:</label> 
+        <textarea id="description" name="description" class="form-control" 
+required></textarea> 
+    </div> 
+--- Page 95 ---
+90 BÀI 5XÂY DỰNG RESTful API 
+ 
+    <div class="form-group"> 
+        <label for="price">Giá:</label> 
+        <input type="number" id="price" name="price" class="form-control" step="0.01" 
+required> 
+    </div> 
+    <div class="form-group"> 
+        <label for="category_id">Danh mục:</label> 
+        <select id="category_id" name="category_id" class="form-control" required> 
+            <!-- Các danh mục sẽ được tải từ API và hiển thị tại đây --> 
+        </select> 
+    </div> 
+    <button type="submit" class="btn btn-primary">Lưu thay đổi</button> 
+</form> 
+ 
+<a href="/webbanhang/Product/list" class="btn btn-secondary mt-2">Quay lại danh sách 
+sản phẩm</a> 
+ 
+<?php include 'app/views/shares/footer.php'; ?> 
+ 
+<script> 
+document.addEventListener("DOMContentLoaded", function() { 
+    // const urlParams = new URLSearchParams(window.location.search); 
+    const productId = <?= $editId ?>; 
+ 
+ 
+    fetch(`/webbanhang/api/product/${productId}`) 
+        .then(response => response.json()) 
+        .then(data => { 
+            document.getElementById('id').value = data.id; 
+            document.getElementById('name').value = data.name; 
+            document.getElementById('description').value = data.description; 
+            document.getElementById('price').value = data.price; 
+            document.getElementById('category_id').value = data.category_id; 
+        }); 
+ 
+    fetch('/webbanhang/api/category') 
+        .then(response => response.json()) 
+        .then(data => { 
+            const categorySelect = document.getElementById('category_id'); 
+            data.forEach(category => { 
+                const option = document.createElement('option'); 
+                option.value = category.id; 
+                option.textContent = category.name; 
+                categorySelect.appendChild(option); 
+            }); 
+        }); 
+ 
+--- Page 96 ---
+BÀI 5 XÂY DỰNG RESTful API 91 
+ 
+    document.getElementById('edit-product-form').addEventListener('submit', 
+function(event) { 
+        event.preventDefault(); 
+ 
+        const formData = new FormData(this); 
+        const jsonData = {}; 
+        formData.forEach((value, key) => { 
+            jsonData[key] = value; 
+        }); 
+ 
+        fetch(`/webbanhang/api/product/${jsonData.id}`, { 
+            method: 'PUT', 
+            headers: { 
+                'Content-Type': 'application/json' 
+            }, 
+            body: JSON.stringify(jsonData) 
+        }) 
+        .then(response => response.json()) 
+        .then(data => { 
+            if (data.message === 'Product updated successfully') { 
+                location.href = '/webbanhang/Product'; 
+            } else { 
+                alert('Cập nhật sản phẩm thất bại'); 
+            } 
+        }); 
+    }); 
+}); 
+</script> 
+ 
+  
+--- Page 97 ---
+92 BÀI 5XÂY DỰNG RESTful API 
+ 
+5.5 Tiến hành khởi chạy dự án và sử dụng 
+postman để kiểm thử API 
+Phương thức GET 
+ 
+  
+
+--- Page 98 ---
+BÀI 5 XÂY DỰNG RESTful API 93 
+ 
+Phương thức POST: 
+ 
+  
+
+--- Page 99 ---
+94 BÀI 5XÂY DỰNG RESTful API 
+ 
+Phương thức PUT: 
+ 
+Phương thức DELETE: 
+
+--- Page 100 ---
+BÀI 5 XÂY DỰNG RESTful API 95 
+ 
+ 
+ 
+5.6 Yêu cầu bổ sung 
+Xây dựng trang front-end cho API bằng jquery. 
+
+--- Page 101 ---
+96 BÀI 6Bảo mật RESTful API với JWT 
+ 
+BÀI 6.  Bảo mật RESTful API với JWT  
+Sau khi học xong bài này, sinh viên có thể nắm được: 
+ Khái niệm về JWT (JSON Web Token): Hiểu cơ bản về JWT, cách thức hoạt 
+động và ứng dụng của nó trong bảo mật API. 
+ Cài đặt thư viện JWT: Biết cách cài đặt và cấu hình thư viện JWT trong dự 
+án PHP. 
+ Tạo và xác thực JWT: Học cách tạo token JWT khi người dùng đăng nhập và 
+xác thực token này trong các yêu cầu API. 
+ Bảo vệ các endpoints API: Triển khai bảo vệ các endpoints quan trọng bằng 
+cách yêu cầu JWT hợp lệ cho mỗi yêu cầu. 
+ Thực hành bảo mật API: Hiểu và triển khai các biện pháp bảo mật nâng cao 
+cho RESTful API sử dụng JWT. 
+6.1 Cài đặt thư viện JWT 
+JSON Web Tokens (JWT) là một cách phổ biến để bảo mật API và xác thực người dùng. 
+Trong hướng dẫn này, chúng ta sẽ sử dụng PHP để bảo mật RESTful API bằng JWT. 
+Chúng ta sẽ sử dụng thư viện firebase/php-jwt để tạo và xác thực JWT. 
+Truy cập trang web: https://getcomposer.org/download/ để tiến hành tải bản cài đặt 
+Các bước cài đặt tiến hành cài mặc định. 
+--- Page 102 ---
+BÀI 6 Bảo mật RESTful API với JWT 97 
+ 
+ 
+  
+
+--- Page 103 ---
+98 BÀI 6Bảo mật RESTful API với JWT 
+ 
+Vào terminal gõ composer để kiểm tra cài đặt thành công: 
+ 
+Cài đặt composer vào dự án: 
+Trong cửa sổ visual code studio của dự án chọn thẻ Terminal và click New Terminal: 
+ 
+  
+
+--- Page 104 ---
+BÀI 6 Bảo mật RESTful API với JWT 99 
+ 
+Nhập câu lệnh sau: composer require firebase/php-jwt 
+ 
+6.2 Tạo lớp xử lý JWT 
+Tạo một lớp JWTHandler để tạo và xác thực JWT. 
+Trong thư mục app tạo thêm thư mục utils để chứa file JWTHandler.php 
+app/utils/JWTHandler.php 
+<?php 
+ 
+require_once 'vendor/autoload.php'; 
+use \Firebase\JWT\JWT; 
+use \Firebase\JWT\Key; 
+ 
+class JWTHandler 
+{ 
+    private $secret_key; 
+ 
+    public function __construct() 
+    { 
+        $this->secret_key = "HUTECH"; // Thay thế bằng khóa bí mật của bạn 
+    } 
+ 
+    // Tạo JWT 
+    public function encode($data) 
+    { 
+        $issuedAt = time(); 
+        $expirationTime = $issuedAt + 3600;  // jwt valid for 1 hour from the issued 
+time 
+
+--- Page 105 ---
+100 BÀI 6Bảo mật RESTful API với JWT 
+ 
+        $payload = array( 
+            'iat' => $issuedAt, 
+            'exp' => $expirationTime, 
+            'data' => $data 
+        ); 
+ 
+        return JWT::encode($payload, $this->secret_key, 'HS256'); 
+    } 
+ 
+    // Giải mã JWT 
+    public function decode($jwt) 
+    { 
+        try { 
+            $decoded = JWT::decode($jwt, new Key($this->secret_key, 'HS256')); 
+            return (array) $decoded->data; 
+        } catch (Exception $e) { 
+            return null; 
+        } 
+    } 
+} 
+?> 
+6.3 Cập nhật API để sử dụng JWT 
+Cập nhật ProductApiController để bảo vệ các endpoint bằng JWT. 
+<?php 
+require_once('app/config/database.php'); 
+require_once('app/models/ProductModel.php'); 
+require_once('app/models/CategoryModel.php'); 
+ 
+require_once('app/utils/JWTHandler.php'); // 
+class ProductApiController 
+{ 
+    private $productModel; 
+    private $db; 
+    private $jwtHandler; // 
+    public function __construct() 
+    { 
+        $this->db = (new Database())->getConnection(); 
+        $this->productModel = new ProductModel($this->db); 
+ 
+        $this->jwtHandler = new JWTHandler(); // 
+    } 
+ 
+    private function authenticate() 
+    { 
+        $headers = apache_request_headers(); 
+--- Page 106 ---
+BÀI 6 Bảo mật RESTful API với JWT 
+10
+1 
+ 
+        if (isset($headers['Authorization'])) { 
+            $authHeader = $headers['Authorization']; 
+            $arr = explode(" ", $authHeader); 
+            $jwt = $arr[1] ?? null; 
+            if ($jwt) { 
+                $decoded = $this->jwtHandler->decode($jwt); 
+                return $decoded ? true : false; 
+            } 
+        } 
+        return false; 
+    } 
+ 
+     
+    // Lấy danh sách sản phẩm 
+    public function index() 
+    { 
+        if ($this->authenticate()) { 
+            header('Content-Type: application/json'); 
+            $products = $this->productModel->getProducts(); 
+            echo json_encode($products); 
+        } else { 
+            http_response_code(401); 
+            echo json_encode(['message' => 'Unauthorized']); 
+        } 
+    } 
+ 
+    // Lấy thông tin sản phẩm theo ID 
+    public function show($id) 
+    { 
+        header('Content-Type: application/json'); 
+        $product = $this->productModel->getProductById($id); 
+        if ($product) { 
+            echo json_encode($product); 
+        } else { 
+            http_response_code(404); 
+            echo json_encode(['message' => 'Product not found']); 
+        } 
+    } 
+ 
+    // Thêm sản phẩm mới 
+    public function store() 
+    { 
+         
+        header('Content-Type: application/json'); 
+        $data = json_decode(file_get_contents("php://input"), true); 
+ 
+--- Page 107 ---
+102 BÀI 6Bảo mật RESTful API với JWT 
+ 
+        $name = $data['name'] ?? ''; 
+        $description = $data['description'] ?? ''; 
+        $price = $data['price'] ?? ''; 
+        $category_id = $data['category_id'] ?? null; 
+ 
+        $result = $this->productModel->addProduct($name, $description, $price, 
+$category_id, null); 
+ 
+        if (is_array($result)) { 
+            http_response_code(400); 
+            echo json_encode(['errors' => $result]); 
+        } else { 
+            http_response_code(201); 
+            echo json_encode(['message' => 'Product created successfully']); 
+        } 
+    } 
+ 
+    // Cập nhật sản phẩm theo ID 
+    public function update($id) 
+    { 
+        header('Content-Type: application/json'); 
+        $data = json_decode(file_get_contents("php://input"), true); 
+ 
+        $name = $data['name'] ?? ''; 
+        $description = $data['description'] ?? ''; 
+        $price = $data['price'] ?? ''; 
+        $category_id = $data['category_id'] ?? null; 
+ 
+        $result = $this->productModel->updateProduct($id, $name, $description, $price, 
+$category_id, null); 
+ 
+        if ($result) { 
+            echo json_encode(['message' => 'Product updated successfully']); 
+        } else { 
+            http_response_code(400); 
+            echo json_encode(['message' => 'Product update failed']); 
+        } 
+    } 
+ 
+    // Xóa sản phẩm theo ID 
+    public function destroy($id) 
+    { 
+        header('Content-Type: application/json'); 
+        $result = $this->productModel->deleteProduct($id); 
+ 
+        if ($result) { 
+            echo json_encode(['message' => 'Product deleted successfully']); 
+--- Page 108 ---
+BÀI 6 Bảo mật RESTful API với JWT 
+10
+3 
+ 
+        } else { 
+            http_response_code(400); 
+            echo json_encode(['message' => 'Product deletion failed']); 
+        } 
+    } 
+} 
+?> 
+Cập nhật AccountController.php 
+<?php 
+require_once('app/config/database.php'); 
+require_once('app/models/AccountModel.php'); 
+require_once('app/utils/JWTHandler.php'); 
+class AccountController { 
+    private $accountModel; 
+    private $db; 
+ 
+    private $jwtHandler; 
+    public function __construct() { 
+        $this->db = (new Database())->getConnection(); 
+        $this->accountModel = new AccountModel($this->db); 
+        $this->jwtHandler = new JWTHandler(); 
+    } 
+ 
+    function register(){ 
+        include_once 'app/views/account/register.php'; 
+    } 
+    public function login() { 
+        include_once 'app/views/account/login.php'; 
+    } 
+ 
+    function save(){ 
+         
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') { 
+            $username = $_POST['username'] ?? ''; 
+            $fullName = $_POST['fullname'] ?? ''; 
+            $password = $_POST['password'] ?? ''; 
+            $confirmPassword = $_POST['confirmpassword'] ?? ''; 
+ 
+            $errors =[]; 
+            if(empty($username)){ 
+                $errors['username'] = "Vui long nhap userName!"; 
+            } 
+            if(empty($fullName)){ 
+                $errors['fullname'] = "Vui long nhap fullName!"; 
+--- Page 109 ---
+104 BÀI 6Bảo mật RESTful API với JWT 
+ 
+            } 
+            if(empty($password)){ 
+                $errors['password'] = "Vui long nhap password!"; 
+            } 
+            if($password != $confirmPassword){ 
+                $errors['confirmPass'] = "Mat khau va xac nhan chua dung"; 
+            } 
+            //kiểm tra username đã được đăng ký chưa? 
+            $account = $this->accountModel->getAccountByUsername($username); 
+ 
+            if($account){ 
+                $errors['account'] = "Tai khoan nay da co nguoi dang ky!"; 
+            } 
+             
+            if(count($errors) > 0){ 
+                include_once 'app/views/account/register.php'; 
+            }else{ 
+                $password = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]); 
+                 
+                $result = $this->accountModel->save($username, $fullName, $password); 
+                 
+                if($result){ 
+                    header('Location: /webbanhang/account/login'); 
+                } 
+            } 
+        }        
+        
+    } 
+    function logout(){ 
+         
+        unset($_SESSION['username']); 
+        unset($_SESSION['role']); 
+ 
+        header('Location: /webbanhang/product'); 
+    } 
+    public function checkLogin() 
+    { 
+        header('Content-Type: application/json'); 
+        $data = json_decode(file_get_contents("php://input"), true); 
+ 
+        $username = $data['username'] ?? ''; 
+        $password = $data['password'] ?? ''; 
+ 
+        $user = $this->accountModel->getAccountByUserName($username); 
+        if ($user && password_verify($password, $user->password)) { 
+            $token = $this->jwtHandler->encode(['id' => $user->id, 'username' => 
+$user->username]); 
+--- Page 110 ---
+BÀI 6 Bảo mật RESTful API với JWT 
+10
+5 
+ 
+            echo json_encode(['token' => $token]); 
+        } else { 
+            http_response_code(401); 
+            echo json_encode(['message' => 'Invalid credentials']); 
+        } 
+    } 
+} 
+6.4  Cập nhật các trang hiển thị 
+Cập nhật views  app/views/account/login.php 
+ 
+<?php include 'app/views/shares/header.php'; ?> 
+ 
+<section class="vh-100 gradient-custom"> 
+  <div class="container py-5 h-100"> 
+    <div class="row d-flex justify-content-center align-items-center h-100"> 
+      <div class="col-12 col-md-8 col-lg-6 col-xl-5"> 
+        <div class="card bg-dark text-white" style="border-radius: 1rem;"> 
+          <div class="card-body p-5 text-center"> 
+ 
+          <form id="login-form"> 
+            <div class="mb-md-5 mt-md-4 pb-5"> 
+ 
+              <h2 class="fw-bold mb-2 text-uppercase">Login</h2> 
+              <p class="text-white-50 mb-5">Please enter your login and password!</p> 
+ 
+              <div class="form-outline form-white mb-4"> 
+                <input type="text" name="username" class="form-control form-control-
+lg" /> 
+                <label class="form-label" for="typeEmailX">UserName</label> 
+              </div> 
+ 
+              <div class="form-outline form-white mb-4"> 
+                <input type="password" name="password" class="form-control form-
+control-lg" /> 
+                <label class="form-label" for="typePasswordX">Password</label> 
+              </div> 
+ 
+              <p class="small mb-5 pb-lg-2"><a class="text-white-50" href="#!">Forgot 
+password?</a></p> 
+ 
+              <button class="btn btn-outline-light btn-lg px-5" 
+type="submit">Login</button> 
+ 
+--- Page 111 ---
+106 BÀI 6Bảo mật RESTful API với JWT 
+ 
+              <div class="d-flex justify-content-center text-center mt-4 pt-1"> 
+                <a href="#!" class="text-white"><i class="fab fa-facebook-f fa-
+lg"></i></a> 
+                <a href="#!" class="text-white"><i class="fab fa-twitter fa-lg mx-4 
+px-2"></i></a> 
+                <a href="#!" class="text-white"><i class="fab fa-google fa-
+lg"></i></a> 
+              </div> 
+ 
+            </div> 
+ 
+            <div> 
+              <p class="mb-0">Don't have an account? <a href="#!" class="text-white-50 
+fw-bold">Sign Up</a> 
+              </p> 
+            </div> 
+            </form> 
+ 
+          </div> 
+        </div> 
+      </div> 
+    </div> 
+  </div> 
+</section> 
+        
+<?php include 'app/views/shares/footer.php'; ?> 
+<script> 
+document.getElementById('login-form').addEventListener('submit', function(event) { 
+    event.preventDefault(); 
+     
+    const formData = new FormData(this); 
+    const jsonData = {}; 
+    formData.forEach((value, key) => { 
+        jsonData[key] = value; 
+    }); 
+ 
+    fetch('/webbanhang/account/checkLogin', { 
+        method: 'POST', 
+        headers: { 
+            'Content-Type': 'application/json' 
+        }, 
+        body: JSON.stringify(jsonData) 
+    }) 
+    .then(response => response.json()) 
+    .then(data => { 
+     
+        if (data.token) { 
+--- Page 112 ---
+BÀI 6 Bảo mật RESTful API với JWT 
+10
+7 
+ 
+            localStorage.setItem('jwtToken', data.token); 
+            location.href = '/webbanhang/Product'; 
+        } else { 
+            alert('Đăng nhập thất bại'); 
+        } 
+    }); 
+}); 
+</script> 
+Cập nhật file header.php 
+<!DOCTYPE html> 
+<html lang="en"> 
+<head> 
+    <meta charset="UTF-8"> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+    <title>Quản lý sản phẩm</title> 
+    <link 
+href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" 
+rel="stylesheet"> 
+    <style> 
+    .product-image { 
+        max-width: 100px; 
+        height: auto; 
+    } 
+    </style> 
+</head> 
+ 
+<body> 
+    <nav class="navbar navbar-expand-lg navbar-light bg-light"> 
+        <a class="navbar-brand" href="#">Quản lý sản phẩm</a> 
+        <button class="navbar-toggler" type="button" data-toggle="collapse" data-
+target="#navbarNav" 
+            aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle 
+navigation"> 
+            <span class="navbar-toggler-icon"></span> 
+        </button> 
+        <div class="collapse navbar-collapse" id="navbarNav"> 
+            <ul class="navbar-nav"> 
+                <li class="nav-item"> 
+                    <a class="nav-link" href="/webbanhang/Product/">Danh sách sản 
+phẩm</a> 
+                </li> 
+                <li class="nav-item"> 
+                    <a class="nav-link" href="/webbanhang/Product/add">Thêm sản 
+phẩm</a> 
+--- Page 113 ---
+108 BÀI 6Bảo mật RESTful API với JWT 
+ 
+                </li> 
+                <li class="nav-item" id="nav-login"> 
+                    <a class="nav-link" href="/webbanhang/account/login">Login</a> 
+                </li> 
+                <li class="nav-item" id="nav-logout" style="display: none;"> 
+                    <a class="nav-link" href="#" onclick="logout()">Logout</a> 
+                </li> 
+            </ul> 
+        </div> 
+    </nav> 
+ 
+    <script> 
+    function logout() { 
+        localStorage.removeItem('jwtToken'); 
+        location.href = '/webbanhang/account/login'; 
+    } 
+ 
+    document.addEventListener("DOMContentLoaded", function() { 
+        const token = localStorage.getItem('jwtToken'); 
+        if (token) { 
+            document.getElementById('nav-login').style.display = 'none'; 
+            document.getElementById('nav-logout').style.display = 'block'; 
+        } else { 
+            document.getElementById('nav-login').style.display = 'block'; 
+            document.getElementById('nav-logout').style.display = 'none'; 
+        } 
+    }); 
+    </script> 
+    <div class="container mt-4"> 
+Cập nhật trang list.php 
+<?php include 'app/views/shares/header.php'; ?> 
+ 
+<h1>Danh sách sản phẩm</h1> 
+<a href="/webbanhang/Product/add" class="btn btn-success mb-2">Thêm sản phẩm mới</a> 
+<ul class="list-group" id="product-list"> 
+    <!-- Danh sách sản phẩm sẽ được tải từ API và hiển thị tại đây --> 
+</ul> 
+ 
+<?php include 'app/views/shares/footer.php'; ?> 
+ 
+<script> 
+document.addEventListener("DOMContentLoaded", function() { 
+    const token = localStorage.getItem('jwtToken'); 
+    if (!token) { 
+        alert('Vui lòng đăng nhập'); 
+        location.href = '/webbanhang/account/login'; // Điều hướng đến trang đăng nhập 
+--- Page 114 ---
+BÀI 6 Bảo mật RESTful API với JWT 
+10
+9 
+ 
+        return; 
+    } 
+    fetch('/webbanhang/api/product', { 
+        method: 'GET', 
+        headers: { 
+            'Content-Type': 'application/json', 
+            'Authorization': 'Bearer ' + token 
+        } 
+    }) 
+        .then(response => response.json()) 
+        .then(data => { 
+            const productList = document.getElementById('product-list'); 
+            data.forEach(product => { 
+                const productItem = document.createElement('li'); 
+                productItem.className = 'list-group-item'; 
+                productItem.innerHTML = ` 
+                    <h2><a 
+href="/webbanhang/Product/show/${product.id}">${product.name}</a></h2> 
+                    <p>${product.description}</p> 
+                    <p>Giá: ${product.price} VND</p> 
+                    <p>Danh mục: ${product.category_name}</p> 
+                    <a href="/webbanhang/Product/edit/${product.id}" class="btn btn-
+warning">Sửa</a> 
+                    <button class="btn btn-danger" 
+onclick="deleteProduct(${product.id})">Xóa</button> 
+                `; 
+                productList.appendChild(productItem); 
+            }); 
+        }); 
+}); 
+function deleteProduct(id) { 
+    if (confirm('Bạn có chắc chắn muốn xóa sản phẩm này?')) { 
+        fetch(`/webbanhang/api/product/${id}`, { 
+            method: 'DELETE' 
+        }) 
+        .then(response => response.json()) 
+        .then(data => { 
+            if (data.message === 'Product deleted successfully') { 
+                location.reload(); 
+            } else { 
+                alert('Xóa sản phẩm thất bại'); 
+            } 
+        }); 
+    } 
+} 
+</script> 
+--- Page 115 ---
+110 BÀI 6Bảo mật RESTful API với JWT 
+ 
+ 
+  
+--- Page 116 ---
+BÀI 6 Bảo mật RESTful API với JWT 
+11
+1 
+ 
+6.5 Tiến hành  khởi chạy  dự án và thực nghiệm 
+Yêu cầu đăng nhập mới xem được trang danh sách sản phẩm: 
+  
+Kiểm thử trong Postman:  
+API đã bị chặn khi không đăng nhập tài khoản 
+ 
+ 
+
+--- Page 117 ---
+112 TÀI LIỆU THAM KHẢO 
+ 
+TÀI LIỆU THAM KHẢO  
+1. Clean Code: A Handbook of Agile Software Craftsmanship, Robert C. Martin, 2008 
+2. Eloquent JavaScript: A Modern Introduction to Programming, Marijn Haverbeke, 
+2018 (3rd edition) 
+3. You Don't Know JS (series), Kyle Simpson, 2015 
+4. MDN Web Docs (https://developer.mozilla.org) 
+5. Stack Overflow (https://stackoverflow.com)  
+6. GitHub (https://github.com) 
+7. W3Schools (https://www.w3schools.com) 
+8. Smashing Magazine (https://www.smashingmagazine.com)  
+ 
